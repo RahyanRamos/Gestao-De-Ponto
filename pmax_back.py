@@ -1,5 +1,8 @@
 import mysql.connector
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
 def tratar_direcao(dir):
     aux = {'I': 'IDA',
@@ -11,10 +14,10 @@ def tratar_direcao(dir):
 class Pmax():
     def __init__(self):
         self.__conexao = mysql.connector.connect(
-            passwd='Destak2024',
-            port=3306,
-            user='admin',
-            host='destakveiculos.cjq8g4ggucwy.us-east-1.rds.amazonaws.com',
+            passwd=os.getenv("DB_PASS"),
+            port=os.getenv("DB_PORT"),
+            user=os.getenv("DB_USER"),
+            host=os.getenv("DB_HOST"),
             database='gestao_escala'
         )
 
@@ -79,7 +82,7 @@ class Pmax():
         cursor = self.__get_cursor()
 
         cmd = """SELECT
-                id_gregistro, itinerario, fgkey_motorist
+                id_gregistro, itinerario, num_veiculo, datetime_insert, fgkey_motorist
             FROM
                 pmax_getregistro
             WHERE
@@ -106,7 +109,7 @@ class Pmax():
     @staticmethod
     def set_jornadas_opc(jornadas_post, registros_pontos):
         jornadas_disponiveis = [
-            (x[0], x[1]) for x in jornadas_post
+            (x[0], x[1], x[2], x[3]) for x in jornadas_post
             if not any(y[1] == 7 for y in registros_pontos if y[0] == x[0])
         ]
         return jornadas_disponiveis
