@@ -2,8 +2,15 @@ import streamlit as st
 from pmax_back import Pmax
 from conexao import conexaoBD
 from time import sleep
+from datetime import datetime
 
 st.set_page_config("Gestão de Ponto", layout="wide")
+
+# criar = st.button("Criar Usuário")
+# if criar:
+#     nome = "Rahyan Ramos"
+#     login = "rahyanramos.dev@gmail.com"
+
 
 html = """<div class="cabecalho">
         <div class="titulo">
@@ -96,7 +103,7 @@ css = """@import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wg
 st.write(f"<div>{html}</div>", unsafe_allow_html=True)
 st.write(f"<style>{css}</style>", unsafe_allow_html=True)
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=10, show_spinner=False)
 def get_itinerarios():
     ponto_max = Pmax()
     dados_itinerarios = ponto_max.get_itenerarios()
@@ -105,7 +112,7 @@ def get_itinerarios():
 
     return opc_itinerarios
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=10, show_spinner=False)
 def get_typeregistros():
     ponto_max = Pmax()
     dados_typeregistros = ponto_max.get_typeregistros()
@@ -116,7 +123,7 @@ def get_typeregistros():
 
     return opc_nomes_typeregistros, opc_ids_typeregistros
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=10, show_spinner=False)
 def get_jornadas_disponiveis(fgkey_motorist):
     ponto_max = Pmax()
 
@@ -129,7 +136,31 @@ def get_jornadas_disponiveis(fgkey_motorist):
     # Prepara as opções para o selectbox (jornadas sem número 7)
     opc_jornadas = ponto_max.set_jornadas_opc(jornadas_motorista, registros_pontos)
 
-    return opc_jornadas
+    return opc_jornadas, registros_pontos
+
+def definir_opcoes_parada(paradas_registradas):
+    if not paradas_registradas:
+        return ["Entrada em Serviço"], [1]  # ID 1 para "Entrada em Serviço"
+    
+    # Se "Início da Viagem" estiver registrado
+    if 1 in paradas_registradas:
+        # Se "Término da Viagem" ainda não foi registrado, ofereça as opções
+        if 2 in paradas_registradas and 6 not in paradas_registradas:
+            return ["Intervalo", "Tempo de espera", "Repouso no Veículo", "Término da Viagem"], [3, 4, 5, 6]
+        
+        # Se "Término da Viagem" foi selecionado, ofereça apenas "Saída de Serviço"
+        if 6 in paradas_registradas:
+            return ["Saída de Serviço"], [7]
+
+    # Se "Entrada em Serviço" está registrado e "Início da Viagem" ainda não
+    if 1 in paradas_registradas and 2 not in paradas_registradas:
+        return ["Início da Viagem"], [2]  # ID 2 para "Início da Viagem"
+
+    # Se "Término da Viagem" foi registrado, a próxima opção será "Saída de Serviço"
+    if 6 in paradas_registradas:
+        return ["Saída de Serviço"], [7]
+
+    return [], []  # Caso padrão, nenhuma opção disponível
 
 def limpa_insert(insert_str):
     return str(insert_str).replace('"', "'")
@@ -195,209 +226,224 @@ with st.expander("Criar Jornada"):
 
 tab1, tab2 = st.tabs(["Jornadas em aberto", "Jornadas finalizadas"])
 with tab1:
-    opc_jornadas = get_jornadas_disponiveis(fgkey_motorist=679)  # ID do motorista
+    try:
+        opc_jornadas, registros_pontos = get_jornadas_disponiveis(fgkey_motorist=679)  # ID do motorista
+        
+        if opc_jornadas:
+            for jornada in opc_jornadas:            
+                # Criando o nome do expander concatenando os valores
+                nome_expander = f"{jornada[1]} - {jornada[2]} - {jornada[3].strftime('%d/%m/%Y %H:%M')}"
+                with st.expander(nome_expander):
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    with col1:
+                        fgkey_jornada = jornada[0]  # Assumindo que o índice 0 seja o ID da jornada
 
-    # Selectbox exibindo o campo 'itinerario' e retornando 'id_gregistro'
-    if opc_jornadas:
-        jornada_selecionada = st.selectbox(
-            "Selecione a Jornada",
-            options=[(x[1], x[0]) for x in opc_jornadas],
-            format_func=lambda x: x[0],  # Exibe o itinerário
-            index=0
-        )
-        id_gregistro_selecionado = jornada_selecionada[1]
-    else:
-        st.write("Nenhuma jornada disponível.")
+                        # Filtra os registros de ponto para essa jornada específica
+                        paradas_registradas = [reg[1] for reg in registros_pontos if reg[0] == fgkey_jornada]
 
-    with st.expander("Registros de Ponto"):
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            opc_nomes_typeregistros, opc_ids_typeregistros = get_typeregistros()
-            tpParada = st.selectbox("Tipo de Ponto", opc_nomes_typeregistros, index=None, placeholder="Selecione o tipo de parada")
+                        # Definir as opções do selectbox com base nas paradas já registradas
+                        opc_nomes_typeregistros, opc_ids_typeregistros = definir_opcoes_parada(paradas_registradas)
 
-        if tpParada:
-            # Retorna o id correspondente ao nome selecionado
-            idParada = opc_ids_typeregistros[opc_nomes_typeregistros.index(tpParada)]
+                        # Mostrar o selectbox com as opções filtradas
+                        tpParada = st.selectbox(
+                            "Tipo de Ponto", 
+                            opc_nomes_typeregistros, 
+                            index=None, 
+                            placeholder="Selecione o tipo de parada", 
+                            key=f"Tipo de Ponto - {fgkey_jornada}"
+                        )
 
-            if idParada in [1, 2, 6, 7]:
-                with col2:
-                    data = st.date_input("Data")
-                with col3:
-                    hora = st.time_input("Hora")
-            else:
-                with col2:
-                    dtInicio = st.date_input("Data de Início")
-                with col3:
-                    hrInicio = st.time_input("Hora de Início")
+                    if tpParada:
+                        try:
+                            # Retorna o id correspondente ao nome selecionado
+                            idParada = opc_ids_typeregistros[opc_nomes_typeregistros.index(tpParada)]
 
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col2:
-                    dtFim = st.date_input("Data de Fim")
-                with col3:
-                    hrFim = st.time_input("Hora de Fim")
+                            if idParada in [1, 2, 6, 7]:
+                                with col2:
+                                    data = st.date_input("Data", key=f"Data - {nome_expander}")
+                                with col3:
+                                    hora = st.time_input("Hora", key=f"Hora - {nome_expander}")
+                            else:
+                                with col2:
+                                    dtInicio = st.date_input("Data de Início", key=f"Data de Início - {nome_expander}")
+                                with col3:
+                                    hrInicio = st.time_input("Hora de Início", key=f"Hora de Início - {nome_expander}")
 
-            colAux, col4 = st.columns([4, 1])
-            with col4:
-                st.write(" ")
-                st.write(" ")
-                registrar = st.button("Registrar", use_container_width=True)
+                                col1, col2, col3 = st.columns([2, 1, 1])
+                                with col2:
+                                    dtFim = st.date_input("Data de Fim", key=f"Data de Fim - {nome_expander}")
+                                with col3:
+                                    hrFim = st.time_input("Hora de Fim", key=f"Hora de Fim - {nome_expander}")
 
-            
+                            colAux, col4 = st.columns([4, 1])
+                            with col4:
+                                st.write(" ")
+                                st.write(" ")
+                                registrar = st.button("Registrar", use_container_width=True, key=f"Registrar - {nome_expander}")
+                        except ValueError as e:
+                            st.error(f"Erro ao selecionar o tipo de parada: {e}")
+                        except Exception as e:
+                            st.error(f"Ocorreu um erro inesperado: {e}")
 
-            dados_jornada = [
-                {
-                    "itinerario": "Ji-Paraná X Porto Velho",
-                    "numero_veiculo": "6421",
-                    "kms": 357,
-                    "numero_mapa": "53468",
-                    "paradas": [
-                        {
-                            "nome_parada": "Entrada em Serviço",
-                            "info_parada": "25/09/2024 - 11:14"
-                        },
-                        {
-                            "nome_parada": "Início da Viagem",
-                            "info_parada": "25/09/2024 - 11:20"
-                        },
-                        {
-                            "nome_parada": "Intervalo",
-                            "infos_parada": [
-                                {"inicio": "25/09/2024 - 15:00", "fim": "25/09/2024 - 15:15"},
-                                {"inicio": "25/09/2024 - 20:40", "fim": "25/09/2024 - 20:50"},
-                                {"inicio": "26/09/2024 - 06:22", "fim": "26/09/2024 - 06:40"}
-                            ]
-                        },
-                        {
-                            "nome_parada": "Término da Viagem",
-                            "info_parada": "26/09/2024 - 18:00"
-                        },
-                        {
-                            "nome_parada": "Saída de Serviço",
-                            "info_parada": "26/09/2024 - 18:10"
+                        dados_jornada = [
+                            {
+                                "itinerario": "Ji-Paraná X Porto Velho",
+                                "numero_veiculo": "6421",
+                                "kms": 357,
+                                "numero_mapa": "53468",
+                                "paradas": [
+                                    {
+                                        "nome_parada": "Entrada em Serviço",
+                                        "info_parada": "25/09/2024 - 11:14"
+                                    },
+                                    {
+                                        "nome_parada": "Início da Viagem",
+                                        "info_parada": "25/09/2024 - 11:20"
+                                    },
+                                    {
+                                        "nome_parada": "Intervalo",
+                                        "infos_parada": [
+                                            {"inicio": "25/09/2024 - 15:00", "fim": "25/09/2024 - 15:15"},
+                                            {"inicio": "25/09/2024 - 20:40", "fim": "25/09/2024 - 20:50"},
+                                            {"inicio": "26/09/2024 - 06:22", "fim": "26/09/2024 - 06:40"}
+                                        ]
+                                    },
+                                    {
+                                        "nome_parada": "Término da Viagem",
+                                        "info_parada": "26/09/2024 - 18:00"
+                                    },
+                                    {
+                                        "nome_parada": "Saída de Serviço",
+                                        "info_parada": "26/09/2024 - 18:10"
+                                    }
+                                ]
+                            }
+                        ]
+                        
+                        html = f"""<div class="container-pontos">
+                            <div class="container-jornada">
+                                <p>Itinerário: {dados_jornada[0]['itinerario']}</p>
+                                <p>Nº do Veículo: {dados_jornada[0]['numero_veiculo']}</p>
+                                <p>Kms: {dados_jornada[0]['kms']}</p>
+                                <p>Nº do Mapa: {dados_jornada[0]['numero_mapa']}</p>
+                            </div>"""
+
+                        for index, parada in enumerate(dados_jornada[0]['paradas'], start=1):
+                            html += f"""<div class="container-tipoParada">
+                                <div class="numRegistro">
+                                    <p>{index}</p>
+                                </div>
+                                <div class="nomeParada">
+                                    <p>{parada['nome_parada']}</p>
+                                </div>
+                                <div class="container-paradas">"""
+                            if 'info_parada' in parada:
+                                html += f"""<div class="infoParada">
+                                        <p>{parada['info_parada']}</p>
+                                    </div>"""
+                            elif 'infos_parada' in parada:
+                                for info in parada['infos_parada']:
+                                    html += f"""<div class="infoParada">
+                                        <p>Início: {info['inicio']}</p>
+                                        <p>Fim: {info['fim']}</p>
+                                    </div>"""
+                        
+                            html += """</div>
+                            </div>"""
+
+                        html += "</div>"
+
+
+                        css = """.container-pontos {
+                            display: flex;
+                            flex-direction: column;
+                            margin: 30px auto;
+                            background-color: #fff;
+                            border-radius: 8px;
+                            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
                         }
-                    ]
-                }
-            ]
-            
-            html = f"""<div class="container-pontos">
-                <div class="container-jornada">
-                    <p>Itinerário: {dados_jornada[0]['itinerario']}</p>
-                    <p>Nº do Veículo: {dados_jornada[0]['numero_veiculo']}</p>
-                    <p>Kms: {dados_jornada[0]['kms']}</p>
-                    <p>Nº do Mapa: {dados_jornada[0]['numero_mapa']}</p>
-                </div>"""
 
-            for index, parada in enumerate(dados_jornada[0]['paradas'], start=1):
-                html += f"""<div class="container-tipoParada">
-                    <div class="numRegistro">
-                        <p>{index}</p>
-                    </div>
-                    <div class="nomeParada">
-                        <p>{parada['nome_parada']}</p>
-                    </div>
-                    <div class="container-paradas">"""
-                if 'info_parada' in parada:
-                    html += f"""<div class="infoParada">
-                            <p>{parada['info_parada']}</p>
-                        </div>"""
-                elif 'infos_parada' in parada:
-                    for info in parada['infos_parada']:
-                        html += f"""<div class="infoParada">
-                            <p>Início: {info['inicio']}</p>
-                            <p>Fim: {info['fim']}</p>
-                        </div>"""
-            
-                html += """</div>
-                </div>"""
+                        .container-tipoParada {
+                            display: flex;
+                            align-items: center;
+                            margin-bottom: 20px;
+                            padding: 10px;
+                            background-color: #e9ecef;
+                            border-radius: 5px;
+                            border-left: 5px solid #007bff;
+                        }
 
-            html += "</div>"
+                        .numRegistro {
+                            font-weight: bold;
+                            color: #007bff;
+                            width: 20px;
+                        }
 
+                        .numRegistro p{
+                            font-weight: bold;
+                            font-size: 18px;
+                        }
 
-            css = """.container-pontos {
-                display: flex;
-                flex-direction: column;
-                margin: 30px auto;
-                background-color: #fff;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            }
+                        .nomeParada {
+                            flex-grow: 1;
+                            padding-left: 15px;
+                        }
 
-            .container-tipoParada {
-                display: flex;
-                align-items: center;
-                margin-bottom: 20px;
-                padding: 10px;
-                background-color: #e9ecef;
-                border-radius: 5px;
-                border-left: 5px solid #007bff;
-            }
+                        .nomeParada p{
+                            font-weight: bold;
+                            color: #007bff;
+                        }
 
-            .numRegistro {
-                font-weight: bold;
-                color: #007bff;
-                width: 20px;
-            }
+                        .infoParada {
+                            display: flex;
+                            flex-direction: column;
+                            width: 100%;
+                            font-size: 14px;
+                            color: #333;
+                            margin: 10px 0;
+                        }
 
-            .numRegistro p{
-                font-weight: bold;
-                font-size: 18px;
-            }
+                        .container-tipoParada .infoParada p {
+                            display: flex;
+                            margin: 2px 0;
+                        }
 
-            .nomeParada {
-                flex-grow: 1;
-                padding-left: 15px;
-            }
+                        .container-tipoParada:nth-child(odd) {
+                            background-color: #f8f9fa;
+                        }
 
-            .nomeParada p{
-                font-weight: bold;
-                color: #007bff;
-            }
+                        .container-tipoParada:nth-child(even) {
+                            background-color: #e9ecef;
+                        }
+                        
+                        .container-jornada {
+                            display: flex;
+                            flex-direction: column;
+                            margin-bottom: 20px;
+                            padding: 15px;
+                            background-color: #f8f9fa;
+                            border-radius: 5px;
+                            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+                            border-left: 5px solid #007bff;
+                        }
 
-            .infoParada {
-                display: flex;
-                flex-direction: column;
-                width: 100%;
-                font-size: 14px;
-                color: #333;
-                margin: 10px 0;
-            }
+                        .container-jornada p {
+                            margin: 5px 0;
+                            font-size: 16px;
+                            color: #333;
+                        }
 
-            .container-tipoParada .infoParada p {
-                display: flex;
-                margin: 2px 0;
-            }
+                        .container-jornada p:first-child {
+                            font-weight: bold;
+                        }"""
 
-            .container-tipoParada:nth-child(odd) {
-                background-color: #f8f9fa;
-            }
-
-            .container-tipoParada:nth-child(even) {
-                background-color: #e9ecef;
-            }
-            
-            .container-jornada {
-                display: flex;
-                flex-direction: column;
-                margin-bottom: 20px;
-                padding: 15px;
-                background-color: #f8f9fa;
-                border-radius: 5px;
-                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-                border-left: 5px solid #007bff;
-            }
-
-            .container-jornada p {
-                margin: 5px 0;
-                font-size: 16px;
-                color: #333;
-            }
-
-            .container-jornada p:first-child {
-                font-weight: bold;
-            }"""
-
-            st.write(html, unsafe_allow_html=True)
-            st.write(f"<style>{css}</style>", unsafe_allow_html=True)
+                        st.write(html, unsafe_allow_html=True)
+                        st.write(f"<style>{css}</style>", unsafe_allow_html=True)
+        else:
+            st.write("Nenhuma jornada disponível.")
+    except Exception as e:
+        st.error(f"Ocorreu um erro ao obter as jornadas: {e}")
+        
 
 with tab2:
     dados_jornadas = [
